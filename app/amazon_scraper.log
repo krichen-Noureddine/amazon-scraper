@@ -1,0 +1,5 @@
+2024-12-21 15:44:18,024 - INFO - Sending GET request to fetch the product page.
+2024-12-21 15:44:18,829 - INFO - Successfully fetched the product page!
+2024-12-21 15:44:18,831 - INFO - Parsing the HTML content.
+2024-12-21 15:44:18,833 - INFO - Extracting product title using CSS selector.
+2024-12-21 15:44:18,835 - WARNING - Product title not found.
