@@ -8,9 +8,6 @@ from bs4 import BeautifulSoup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Amazon product URL
-product_url = 'https://www.amazon.fr/Apple-iPhone-16-Pro-128/dp/B0DGHPQJLP/ref=sr_1_1_sspa?crid=BGDBHPWCUNPV&dib=eyJ2IjoiMSJ9.3LewRmvo9sphyzsL_0IKc5Vvb-lHlfXETGlbATuapM_qVeUYGmHuvU3uMRSEQgQoBCG67Sxb96OF8nKUKfDWPlDjx1eZI50KXfbZ1hzyMFByGF81tir1vbKZZICwFR7qOcldknTnSr2bUBOcBdc7z_8MPaWQ7DMv9oSQf2o9UaAcwGcEAQuwG5woVjuILFsF7PX6PR5CA2pjBG25UH_C1KadqSs-Qnd4nja6tqLi0Gp0M4GI96tYxPzCFhYwbq0uBDL-E_aInZOokrSCVPj-jkL1gCTYOX5okfl0Z37mVt8.Gdc_wFxuRFJDxUWHbWtbRVXjy-WpUg85F00eNET-zJ0&dib_tag=se&keywords=iphone+16+pro+max&nsdOptOutParam=true&qid=1734824763&sprefix=iph%2Caps%2C382&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1'  # Replace with the actual product URL
-
 # Updated headers to mimic a real browser
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -40,25 +37,48 @@ cookies = {
     'ubid-acbfr': '260-3765963-2076313',
 }
 
-# Function to fetch and parse the product page
+def save_image(image_url, product_title):
+    try:
+        logger.info(f"Downloading image from URL: {image_url}")
+        image_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'images')
+        
+        # Create the directory if it doesn't exist
+        if not os.path.exists(image_dir):
+            os.makedirs(image_dir)
+            logger.info(f"Created directory: {image_dir}")
+        
+        # Create a valid file name based on the product title
+        file_name = f"{product_title[:50].replace(' ', '_').replace('/', '_')}.jpg"
+        image_path = os.path.join(image_dir, file_name)
+        
+        # Download and save the image
+        response = requests.get(image_url, stream=True)
+        if response.status_code == 200:
+            with open(image_path, 'wb') as f:
+                for chunk in response.iter_content(1024):
+                    f.write(chunk)
+            logger.info(f"Image saved successfully as {image_path}")
+            return image_path
+        else:
+            logger.error(f"Failed to download image. Status code: {response.status_code}")
+            return None
+    except Exception as e:
+        logger.error(f"An error occurred while saving the image: {e}")
+        return None
+
 def fetch_product_details(url, headers, cookies):
     try:
-        logger.info("Sending request to fetch the product page...")
+        logger.info(f"Fetching details for URL: {url}")
         response = requests.get(url, headers=headers, cookies=cookies)
-        
-        # Check if the request was successful
         if response.status_code == 200:
             logger.info("Successfully fetched the product page!")
-            
-            # Parse the HTML content using BeautifulSoup with lxml parser
             soup = BeautifulSoup(response.text, 'lxml')
 
             # Extracting details
             product_details = {}
-
-            # Product Title
             title = soup.select_one('span#productTitle')
-            product_details['Title'] = title.text.strip() if title else "Not found"
+            product_title = title.text.strip() if title else "Not found"
+            product_details['Title'] = product_title
 
             # Price extraction
             whole_price = soup.select_one('span.a-price-whole')
@@ -69,7 +89,6 @@ def fetch_product_details(url, headers, cookies):
                 price = f"{whole_price.text.strip()},{fraction_price.text.strip()} {currency_symbol.text.strip()}"
             else:
                 price = "Not available"
-            
             product_details['Price'] = price
 
             # Availability
@@ -83,83 +102,80 @@ def fetch_product_details(url, headers, cookies):
             # Number of Reviews
             reviews = soup.select_one('span#acrCustomerReviewText')
             product_details['Number of Reviews'] = reviews.text.strip() if reviews else "No reviews"
-
-            # Product Description
             details_table = soup.select('div.a-section.a-spacing-small.a-spacing-top-small table.a-normal.a-spacing-micro')
-
             if details_table:
                 rows = details_table[0].select('tr')
+                description = []
                 for row in rows:
                     key = row.select_one('td span.a-size-base.a-text-bold')
                     value = row.select_one('td span.a-size-base.po-break-word')
 
                     if key and value:
-                        product_details[key.text.strip()] = value.text.strip()
-
-            # Extracting the product image URL
-            image_url = soup.select_one('img#landingImage')
+                        description.append(f"{key.text.strip()}: {value.text.strip()}")
+                product_details['Description'] = ', '.join(description)
+            else:
+                product_details['Description'] = "No description available"
+            # Image URL and save it
+            image = soup.select_one('img#landingImage')
+            image_url = image['src'] if image else None
             if image_url:
-                image_url = image_url['src']
-                # Save the image to the images folder
-                save_image(image_url)
-                product_details['Image'] = image_url
+                product_details['Image'] = save_image(image_url, product_title)
             else:
                 product_details['Image'] = 'No image found'
 
             return product_details
         else:
-            logger.error(f"Failed to retrieve the page. Status code: {response.status_code}")
+            logger.error(f"Failed to fetch page for URL: {url}. Status code: {response.status_code}")
+            return None
     except requests.exceptions.RequestException as e:
-        logger.error(f"An error occurred while fetching the page: {e}")
-    return None
+        logger.error(f"Error occurred for URL: {url}: {e}")
+        return None
 
-# Function to save the image
-def save_image(image_url):
-    try:
-        logger.info("Downloading image...")
-        image_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'images')  # One level up
-
-        if not os.path.exists(image_dir):
-            os.makedirs(image_dir)
-
-        image_data = requests.get(image_url).content
-        image_name = os.path.join(image_dir, 'product_image.jpg')
-
-        with open(image_name, 'wb') as f:
-            f.write(image_data)
-
-        logger.info(f"Image saved as {image_name}")
-    except Exception as e:
-        logger.error(f"An error occurred while saving the image: {e}")
-
-# Function to save product details to a CSV file outside the app directory
-def save_to_csv(product_details, filename='product_details.csv'):
+# Function to save the details to a CSV file
+def save_to_csv(all_product_details, filename='product_details.csv'):
     try:
         logger.info(f"Saving product details to {filename}...")
-        # Define the new directory for CSV outside the app directory
-        csv_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data')  # One level up
+        csv_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 
-        # Create the directory if it doesn't exist
         if not os.path.exists(csv_dir):
             os.makedirs(csv_dir)
 
         file_path = os.path.join(csv_dir, filename)
-        
+
         with open(file_path, mode='w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
-            # Write header
-            writer.writerow(product_details.keys())
-            # Write data
-            writer.writerow(product_details.values())
+            # Write headers
+            writer.writerow(all_product_details[0].keys())
+            # Write all product details
+            for product_details in all_product_details:
+                writer.writerow(product_details.values())
         logger.info(f"Product details saved to {file_path} successfully.")
     except Exception as e:
-        logger.error(f"An error occurred while saving to CSV: {e}")
+        logger.error(f"Error occurred while saving to CSV: {e}")
 
-# Call the function and display product details
-product_details = fetch_product_details(product_url, headers, cookies)
-if product_details:
-    for key, value in product_details.items():
-        print(f"{key}: {value}")
-    save_to_csv(product_details)  # Save to CSV
-else:
-    print("Failed to fetch product details.")
+# Function to read URLs from links.txt
+def read_links(file_path='links.txt'):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            return [line.strip() for line in file if line.strip()]
+    except FileNotFoundError:
+        logger.error(f"File {file_path} not found.")
+        return []
+
+# Main execution
+if __name__ == '__main__':
+    links = read_links()  # Read links from links.txt
+    if not links:
+        logger.error("No links found in links.txt. Exiting...")
+        exit()
+
+    all_product_details = []
+    for link in links:
+        product_details = fetch_product_details(link, headers, cookies)
+        if product_details:
+            all_product_details.append(product_details)
+
+    if all_product_details:
+        save_to_csv(all_product_details)
+    else:
+        logger.info("No product details were fetched.")
